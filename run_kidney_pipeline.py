@@ -4,7 +4,8 @@ Run (after prepare_kidney_data.py):  python run_kidney_pipeline.py
 
 Order:
   0. split patients 70/30 (by case) - every choice below is made on TRAINING patients only
-  1. anatomical window learned from training ground truth; Phase 1 low-pass cutoff chosen by training Dice
+  1. anatomical window learned from training ground truth; Phase 1 Butterworth D0 and order n chosen by
+     training Dice (Gaussian low-pass swept alongside for the comparison table only)
   2. Phase 2: for every contrast step x strategy, sweep the parameters (training patients);
      each strategy keeps its best contrast step + parameters; then Dice / IoU on all slices, overlays
      (Phase 1 PSNR / CNR tables and figures are made once the final chain is known)
@@ -41,7 +42,8 @@ SWEEP_GRID = {                     # bone_hu first: it decides what the later pa
                   "open_r": [0, 1, 2, 3], "close_r": [0, 2, 3, 5]},
 }
 CONTRAST_OPTIONS = [None, "clahe", "he", "gamma"]
-CUTOFF_OPTIONS = [30, 50, 80, 120]
+CUTOFF_OPTIONS = [15, 20, 30, 40, 60, 80, 120]   # D0 values tried for both low-pass filters
+ORDER_OPTIONS = [1, 2, 3]                       # Butterworth order n
 
 
 # ---------------------------------------------------------------- data
@@ -58,10 +60,10 @@ def load_slices():
     return out
 
 
-def cache_enhanced(slices, cutoff):
+def cache_enhanced(slices, cutoff, order):
     """Phase 1 output of every slice for every contrast option (computed once, reused by the sweep)."""
     for s in slices:
-        s["enh"] = {c: pre.enhance(s["hu"], c, cutoff) for c in CONTRAST_OPTIONS}
+        s["enh"] = {c: pre.enhance(s["hu"], c, cutoff, order) for c in CONTRAST_OPTIONS}
 
 
 def use_contrast(slices, contrast):
@@ -85,7 +87,7 @@ def mean_dice(slices, method, params):
 
 
 # ---------------------------------------------------------------- Phase 1
-def phase1_variants(hu, contrast=None, cutoff=pre.LOWPASS_CUTOFF):
+def phase1_variants(hu, contrast=None, cutoff=pre.LOWPASS_CUTOFF, order=pre.LOWPASS_ORDER):
     """Every enhancement step applied to the windowed slice, for side-by-side comparison."""
     base = pre.window_normalize(hu)
     return {
@@ -95,18 +97,19 @@ def phase1_variants(hu, contrast=None, cutoff=pre.LOWPASS_CUTOFF):
         "CLAHE": pre.enhance_contrast(base, "clahe"),
         "Histogram eq.": pre.enhance_contrast(base, "he"),
         "Gamma 0.8": pre.enhance_contrast(base, "gamma"),
-        f"Gaussian low-pass D0={cutoff}": pre.gaussian_lowpass(base, cutoff),
-        "Final chain": pre.enhance(hu, contrast, cutoff),
+        f"Butterworth D0={cutoff} n={order}": pre.butterworth_lowpass(base, cutoff, order),
+        f"Gaussian LP D0={cutoff} (compared)": pre.gaussian_lowpass(base, cutoff),
+        "Final chain": pre.enhance(hu, contrast, cutoff, order),
     }
 
 
-def phase1_metrics(slices, contrast, cutoff):
+def phase1_metrics(slices, contrast, cutoff, order):
     """Mean PSNR (vs the windowed slice) and CNR (kidney vs a 10-px ring around it) per step."""
     rows = []
     for s in slices:
         body = pre.body_mask(s["hu"]) & ~pre.bone_mask(s["hu"])
         ring = pre.surrounding_ring(s["kidney"], body)
-        variants = phase1_variants(s["hu"], contrast, cutoff)
+        variants = phase1_variants(s["hu"], contrast, cutoff, order)
         base = variants["Window [-100,300]"]
         for name, img in variants.items():
             rows.append({"step": name, "psnr": np.nan if img is base else pre.psnr(base, img),
@@ -116,16 +119,55 @@ def phase1_metrics(slices, contrast, cutoff):
     return table
 
 
-def phase1_figures(s, contrast, cutoff):
+def frequency_figure(s, cutoff, order):
+    """Brief Phase 1.3: filter shapes H(u,v) (Butterworth n = 1, 2, 3 vs Gaussian, same D0), the
+    log-magnitude spectrum before / after each filter, and the filtered slices."""
+    base = pre.window_normalize(s["hu"])
+    bw, ga = pre.butterworth_lowpass(base, cutoff, order), pre.gaussian_lowpass(base, cutoff)
+    fig = plt.figure(figsize=(20, 9))
+    ax = fig.add_subplot(2, 4, 1)
+    d = np.arange(0, 4 * cutoff)
+    for n in ORDER_OPTIONS:
+        ax.plot(d, 1 / (1 + (d / cutoff) ** (2 * n)), label=f"Butterworth n={n}" + (" (chosen)" if n == order else ""))
+    ax.plot(d, np.exp(-d ** 2 / (2 * cutoff ** 2)), "k--", label="Gaussian (compared)")
+    ax.axvline(cutoff, color="0.6", lw=0.8)
+    ax.set_xlabel("D(u,v)  (distance from spectrum centre)")
+    ax.set_ylabel("H")
+    ax.set_title(f"Filter profiles, D0 = {cutoff}")
+    ax.legend(fontsize=8)
+    c = base.shape[0] // 2
+    half = min(4 * cutoff, c)
+    zoom = slice(c - half, c + half)
+    panels = [(f"H Butterworth D0={cutoff} n={order}", pre.butterworth_transfer(base.shape, cutoff, order)[zoom, zoom], None),
+              (f"H Gaussian D0={cutoff}", pre.gaussian_transfer(base.shape, cutoff)[zoom, zoom], None),
+              ("Windowed slice", base, (0, 255)),
+              ("log|DFT| before", pre.log_spectrum(base), (0, 255)),
+              ("log|DFT| after Butterworth", pre.log_spectrum(bw), (0, 255)),
+              ("log|DFT| after Gaussian", pre.log_spectrum(ga), (0, 255)),
+              ("After Butterworth", bw, (0, 255))]
+    for k, (title, img, lim) in enumerate(panels, start=2):
+        ax = fig.add_subplot(2, 4, k)
+        ax.imshow(img, cmap="gray", **({"vmin": lim[0], "vmax": lim[1]} if lim else {}))
+        ax.set_title(title, fontsize=10)
+        ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(RES / "phase1_frequency.png", dpi=100)
+    plt.close(fig)
+
+
+def phase1_figures(s, contrast, cutoff, order):
     """Comparison grid, DFT spectra, histograms and an edge-profile figure for one example slice."""
-    variants = phase1_variants(s["hu"], contrast, cutoff)
+    variants = phase1_variants(s["hu"], contrast, cutoff, order)
     base = variants["Window [-100,300]"]
-    fig, axes = plt.subplots(2, 5, figsize=(18, 7.5))
+    frequency_figure(s, cutoff, order)
+    fig, axes = plt.subplots(3, 4, figsize=(18, 13))
     panels = list(variants.items()) + [("|DFT| before", pre.log_spectrum(base)),
-                                       ("|DFT| after low-pass", pre.log_spectrum(pre.gaussian_lowpass(base, cutoff)))]
+                                       ("|DFT| after Butterworth", pre.log_spectrum(pre.butterworth_lowpass(base, cutoff, order)))]
     for ax, (name, img) in zip(axes.flat, panels):
         ax.imshow(img, cmap="gray", vmin=0, vmax=255)
         ax.set_title(name)
+        ax.axis("off")
+    for ax in axes.flat[len(panels):]:
         ax.axis("off")
     fig.suptitle(f"Phase 1 enhancement steps ({s['name']})")
     fig.tight_layout()
@@ -164,25 +206,34 @@ def phase1_figures(s, contrast, cutoff):
     plt.close(fig)
 
 
-def choose_cutoff(train):
-    """Gaussian low-pass cutoff D0 with the best mean training Dice (both strategies, default
-    settings). CNR is reported too, but it is NOT the criterion: CNR against a ring right next to the
-    kidney keeps rising as smoothing gets weaker, even though the noisier image segments worse."""
+def choose_lowpass(train):
+    """Frequency-filter sweep on TRAINING slices (no contrast step, default Phase 2 settings):
+    Butterworth for every order n and cut-off D0 -> the pair with the best mean training Dice is used.
+    The Gaussian low-pass is swept over the same D0 values for the comparison table only.
+    CNR is reported but is not the criterion: CNR against a ring right next to the kidney keeps
+    rising as smoothing gets weaker, even though the noisier image segments worse."""
+    rings = [pre.surrounding_ring(s["kidney"], pre.body_mask(s["hu"]) & ~pre.bone_mask(s["hu"])) for s in train]
+    configs = [("butterworth", n) for n in ORDER_OPTIONS] + [("gaussian", None)]
     rows = []
-    for c in CUTOFF_OPTIONS:
-        values = []
-        for s in train:
-            s["enhanced"] = pre.enhance(s["hu"], None, c)
-            ring = pre.surrounding_ring(s["kidney"], pre.body_mask(s["hu"]) & ~pre.bone_mask(s["hu"]))
-            values.append(pre.cnr(s["enhanced"], s["kidney"], ring))
-        dice = {m: mean_dice(train, m, seg.DEFAULTS[m]) for m in METHODS}
-        rows.append({"cutoff": c, "train_cnr": round(float(np.mean(values)), 3),
-                     **{f"train_dice_{m}": round(d, 4) for m, d in dice.items()},
-                     "train_dice_mean": round(float(np.mean(list(dice.values()))), 4)})
+    for name, n in configs:
+        for d0 in CUTOFF_OPTIONS:
+            for s in train:
+                s["enhanced"] = pre.enhance(s["hu"], None, d0, n or 1, lowpass=name)
+            dice = {m: mean_dice(train, m, seg.DEFAULTS[m]) for m in METHODS}
+            rows.append({"filter": name, "order_n": n if n else "-", "D0": d0,
+                         "train_cnr": round(float(np.mean([pre.cnr(s["enhanced"], s["kidney"], r)
+                                                           for s, r in zip(train, rings)])), 3),
+                         **{f"train_dice_{m}": round(d, 4) for m, d in dice.items()},
+                         "train_dice_mean": round(float(np.mean(list(dice.values()))), 4)})
+            print(f"  {name:11s} n={n or '-'}  D0={d0:3d}: Dice {rows[-1]['train_dice_mean']:.3f}")
     table = pd.DataFrame(rows)
-    table.to_csv(RES / "phase1_lowpass_cutoff.csv", index=False)
-    print(table.to_string(index=False))
-    return int(table.loc[table["train_dice_mean"].idxmax(), "cutoff"])
+    table.to_csv(RES / "phase1_frequency_comparison.csv", index=False)
+    bw = table[table["filter"] == "butterworth"]
+    best = bw.loc[bw["train_dice_mean"].idxmax()]
+    gauss = table[table["filter"] == "gaussian"]
+    g_best = gauss.loc[gauss["train_dice_mean"].idxmax()]
+    print(f"  best Gaussian (comparison only): D0={int(g_best['D0'])}, Dice {g_best['train_dice_mean']:.3f}")
+    return int(best["D0"]), int(best["order_n"])
 
 
 # ---------------------------------------------------------------- Phase 2
@@ -362,13 +413,13 @@ def candidates_figure(slices, method, params, path):
 
 
 # ---------------------------------------------------------------- Phase 3
-def phase3(slices, method, params, test_cases, contrast, cutoff):
+def phase3(slices, method, params, test_cases, contrast, lowpass):
     """Kidney vs not-kidney SVM on candidate blobs; final kidney mask = blobs the SVM accepts."""
     X, y, groups, owner, blobs = clf.build_dataset(slices, method, params)
     print(f"  {len(y)} candidate blobs, {int(y.sum())} kidney / {int((1 - y).sum())} not kidney")
     result = clf.train_and_evaluate(X, y, groups, test_cases)
     joblib.dump({"model": result["model"], "method": method, "params": params,
-                 "contrast": contrast, "cutoff": cutoff}, MODEL_FILE)
+                 "contrast": contrast, "lowpass_D0_n": lowpass}, MODEL_FILE)
 
     table = pd.DataFrame(X, columns=clf.FEATURE_NAMES)
     table.insert(0, "label", np.where(y == 1, "kidney", "not_kidney"))
@@ -428,14 +479,14 @@ def main():
     WINDOW = seg.learn_window(train)
     print("Anatomical window learned from training ground truth:",
           {k: round(v, 3) for k, v in WINDOW.items()})
-    print("Phase 1: Gaussian low-pass cutoff (training Dice)")
-    cutoff = choose_cutoff(train)
-    print(f"  -> cutoff D0 = {cutoff}")
-    cache_enhanced(slices, cutoff)
+    print("Phase 1: Butterworth D0 x order sweep, Gaussian alongside for comparison (training Dice)")
+    cutoff, order = choose_lowpass(train)
+    print(f"  -> Butterworth D0 = {cutoff}, order n = {order}")
+    cache_enhanced(slices, cutoff, order)
 
     print("Phase 2: contrast step x parameter sweep (training cases only, takes a while)")
     chosen, contrast_of = phase2_sweep(train)
-    PARAMS_FILE.write_text(json.dumps({"cutoff": cutoff, "contrast": contrast_of, "segment": chosen,
+    PARAMS_FILE.write_text(json.dumps({"cutoff": cutoff, "order": order, "contrast": contrast_of, "segment": chosen,
                                        "window": WINDOW, "test_cases": test_cases}, indent=2))
     per_slice, p2 = phase2_evaluate(slices, chosen, contrast_of, test_cases, WINDOW)
     print(p2.to_string())
@@ -449,15 +500,15 @@ def main():
     candidates_figure(worst_slices, best, chosen[best], RES / "failures_candidates.png")
 
     print(f"Phase 1: tables + figures (final chain = window -> bilateral -> "
-          f"{contrast_of[best] or 'no contrast step'} -> Gaussian low-pass D0={cutoff})")
-    p1 = phase1_metrics(slices, contrast_of[best], cutoff)
+          f"{contrast_of[best] or 'no contrast step'} -> Butterworth low-pass D0={cutoff}, n={order})")
+    p1 = phase1_metrics(slices, contrast_of[best], cutoff, order)
     print(p1.to_string())
-    phase1_figures(test[0], contrast_of[best], cutoff)
+    phase1_figures(test[0], contrast_of[best], cutoff, order)
     use_contrast(slices, contrast_of[best])
     morphology_figure(test[0], best, chosen[best])
 
     print("Phase 3: SVM kidney vs not-kidney")
-    p3 = phase3(slices, best, chosen[best], test_cases, contrast_of[best], cutoff)
+    p3 = phase3(slices, best, chosen[best], test_cases, contrast_of[best], (cutoff, order))
     rule_dice = float(np.mean([seg.dice(s[f"pred_{best}"], s["kidney"]) for s in test]))
     svm_dice = float(np.mean([seg.dice(s["pred_svm"], s["kidney"]) for s in test]))
     overlay_grid(spread(test), "pred_svm", RES / "overlays_svm.png", f"{best} + SVM filter, test patients")
@@ -468,7 +519,8 @@ def main():
     save_test_images(test)
     metrics = {
         "train_cases": train_cases, "test_cases": test_cases,
-        "lowpass_cutoff": cutoff, "contrast_step": contrast_of, "rule_window": WINDOW,
+        "lowpass": {"filter": "butterworth", "D0": cutoff, "order_n": order},
+        "contrast_step": contrast_of, "rule_window": WINDOW,
         "phase1": p1.reset_index().to_dict("records"),
         "phase2_params": chosen, "phase2_summary": p2.reset_index().to_dict("records"), "best_strategy": best,
         "phase3": {k: v for k, v in p3.items() if k not in ("model", "test_pred")},

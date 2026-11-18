@@ -58,7 +58,7 @@ class KidneyApp(tk.Tk):
         self.title("Kidney CT pipeline - classical CV (CT036-3-3 IPPR)")
         self.geometry("1400x900")
         self.settings = load_json(RES / "chosen_params.json") or {
-            "cutoff": pre.LOWPASS_CUTOFF, "contrast": {"adaptive": None, "watershed": None}, "segment": seg.DEFAULTS}
+            "cutoff": pre.LOWPASS_CUTOFF, "order": pre.LOWPASS_ORDER, "contrast": {"adaptive": None, "watershed": None}, "segment": seg.DEFAULTS}
         self.metrics = load_json(RES / "metrics.json")
         self.model = joblib.load(RES / "kidney_svm.joblib") if (RES / "kidney_svm.joblib").exists() else None
         self.tumor = None                               # (tumor_preprocess, tumor_segment) once linked
@@ -134,7 +134,7 @@ class KidneyApp(tk.Tk):
         s, cfg = self.slices[i], self.settings
         out = {}
         for m in ("adaptive", "watershed"):           # each strategy on its own best Phase 1 output
-            out[f"enh_{m}"] = pre.enhance(s["hu"], cfg["contrast"][m], cfg["cutoff"])
+            out[f"enh_{m}"] = pre.enhance(s["hu"], cfg["contrast"][m], cfg["cutoff"], cfg.get("order", pre.LOWPASS_ORDER))
             out[m] = seg.segment_kidney(out[f"enh_{m}"], s["hu"], m, window=cfg.get("window"), **cfg["segment"][m])
         best = self.model["method"] if self.model else "adaptive"
         out["enhanced"] = out[f"enh_{best}"]
@@ -188,9 +188,10 @@ class KidneyApp(tk.Tk):
         bilateral = pre.denoise(base, "bilateral")
         best = self.model["method"] if self.model else "adaptive"
         contrast, cutoff = self.settings["contrast"][best], self.settings["cutoff"]
+        order = self.settings.get("order", pre.LOWPASS_ORDER)
         panels = [("Window [-100,300] HU", base), ("Bilateral filter", bilateral),
                   (f"Contrast: {contrast or 'none'}", pre.enhance_contrast(bilateral, contrast) if contrast else bilateral),
-                  ("|DFT| (log)", pre.log_spectrum(base)), (f"Final (Gaussian low-pass D0={cutoff})", out["enhanced"]),
+                  ("|DFT| (log)", pre.log_spectrum(base)), (f"Final (Butterworth D0={cutoff}, n={order})", out["enhanced"]),
                   ("Gaussian smoothing (compared)", pre.denoise(base, "gaussian"))]
         for k, (title, img) in enumerate(panels):
             ax = fig.add_subplot(2, 3, k + 1)

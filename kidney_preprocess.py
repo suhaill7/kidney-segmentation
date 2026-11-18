@@ -4,7 +4,8 @@ Algorithms in this file (chosen so they do not overlap with the tumor member's):
   - HU window [-100, 300] -> 8-bit           (kidney cortex enhances to ~150-250 HU after contrast)
   - Bilateral filter (edge-preserving)        compared against Gaussian smoothing
   - CLAHE vs global Histogram Equalization vs Gamma correction (contrast)
-  - 2D DFT log-magnitude spectrum + Gaussian low-pass filter (frequency domain)
+  - 2D DFT log-magnitude spectrum + Butterworth low-pass filter (frequency domain, brief 6 Phase 1.3);
+    a Gaussian low-pass is kept for comparison only
   - PSNR and CNR to quantify each step
 """
 import cv2
@@ -17,7 +18,12 @@ BODY_HU = -300                # air is about -1000 HU, fat about -100 HU: anythi
 BONE_HU = 350                 # cortical bone is several hundred HU, enhanced kidney stays below this
 FINAL_CONTRAST = None         # default contrast step: None, "clahe", "he" or "gamma". run_kidney_pipeline.py
                               # picks the best one per strategy (results/chosen_params.json).
-LOWPASS_CUTOFF = 50           # default Gaussian low-pass cutoff D0; the pipeline picks it by training CNR.
+# Butterworth low-pass defaults. run_kidney_pipeline.py sweeps both on TRAINING patients (Dice) and
+# stores the chosen pair in results/chosen_params.json, which the app reads.
+LOWPASS_CUTOFF = 30           # D0, cut-off radius in frequency units. Lower D0 = removes more high frequencies
+                              # (more smoothing, less noise, blurrier edges); higher D0 = keeps more detail and noise.
+LOWPASS_ORDER = 2             # n, filter order. Higher n = sharper transition at D0 (closer to an ideal filter,
+                              # more ringing near edges); lower n = gentler roll-off, no ringing, less selective.
 
 
 # ---------------------------------------------------------------- intensity normalization
@@ -83,26 +89,59 @@ def log_spectrum(img):
     return (mag / mag.max() * 255).astype(np.uint8)
 
 
-def gaussian_lowpass(img, cutoff=50):
-    """Gaussian low-pass filter in the frequency domain: H(u,v) = exp(-D(u,v)^2 / (2 * D0^2)).
-    Unlike an ideal low-pass it has no sharp cut-off, so it causes no ringing artefacts."""
-    rows, cols = img.shape
+def distance_grid(shape):
+    """D(u,v): distance of every frequency from the centre of the (shifted) spectrum."""
+    rows, cols = shape
     u = np.arange(rows) - rows // 2
     v = np.arange(cols) - cols // 2
-    dist2 = u[:, None] ** 2 + v[None, :] ** 2
-    h = np.exp(-dist2 / (2.0 * cutoff ** 2))
+    return np.sqrt(u[:, None] ** 2 + v[None, :] ** 2)
+
+
+def butterworth_transfer(shape, cutoff=LOWPASS_CUTOFF, order=LOWPASS_ORDER):
+    """H(u,v) = 1 / (1 + (D(u,v) / D0)^(2n))."""
+    return 1.0 / (1.0 + (distance_grid(shape) / cutoff) ** (2 * order))
+
+
+def gaussian_transfer(shape, cutoff=LOWPASS_CUTOFF):
+    """H(u,v) = exp(-D(u,v)^2 / (2 * D0^2))."""
+    return np.exp(-distance_grid(shape) ** 2 / (2.0 * cutoff ** 2))
+
+
+def apply_frequency_filter(img, h):
+    """DFT -> centre the spectrum -> multiply by H(u,v) -> un-centre -> inverse DFT -> back to 8-bit."""
     spectrum = np.fft.fftshift(np.fft.fft2(img.astype(np.float64)))
     out = np.real(np.fft.ifft2(np.fft.ifftshift(spectrum * h)))
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
+def butterworth_lowpass(img, cutoff=LOWPASS_CUTOFF, order=LOWPASS_ORDER):
+    """Butterworth low-pass filter (BLPF) in the frequency domain, as required by the brief (section 6,
+    Phase 1.3): H(u,v) = 1 / (1 + (D(u,v)/D0)^(2n)).
+    Frequencies well inside D0 pass almost unchanged, frequencies beyond D0 (fine noise, CT streaks)
+    are attenuated; H = 0.5 exactly at D(u,v) = D0. The order n sets how steep the transition is:
+    n = 1 is very gentle, large n approaches the ideal low-pass and starts to ring.
+    Reference: the module's frequency-domain filtering lecture; Gonzalez & Woods, Digital Image
+    Processing, 4th ed., ch. 4 (smoothing with lowpass frequency-domain filters)."""
+    return apply_frequency_filter(img, butterworth_transfer(img.shape, cutoff, order))
+
+
+def gaussian_lowpass(img, cutoff=LOWPASS_CUTOFF):
+    """Gaussian low-pass filter, H(u,v) = exp(-D^2 / (2 D0^2)). COMPARISON ONLY (not in the final chain):
+    the brief asks for a Butterworth or homomorphic filter. The Gaussian is the limiting smooth case:
+    no ringing at any setting, but no way to make the transition sharper."""
+    return apply_frequency_filter(img, gaussian_transfer(img.shape, cutoff))
+
+
 # ---------------------------------------------------------------- final chain
-def enhance(hu, contrast=FINAL_CONTRAST, cutoff=LOWPASS_CUTOFF):
-    """Final Phase 1 chain: window -> bilateral -> (optional contrast step) -> Gaussian low-pass."""
+def enhance(hu, contrast=FINAL_CONTRAST, cutoff=LOWPASS_CUTOFF, order=LOWPASS_ORDER, lowpass="butterworth"):
+    """Final Phase 1 chain: window -> bilateral -> (optional contrast step) -> Butterworth low-pass.
+    lowpass="gaussian" is only used to build the comparison table."""
     img = denoise(window_normalize(hu), "bilateral")
     if contrast:
         img = enhance_contrast(img, contrast)
-    return gaussian_lowpass(img, cutoff)
+    if lowpass == "gaussian":
+        return gaussian_lowpass(img, cutoff)
+    return butterworth_lowpass(img, cutoff, order)
 
 
 # ---------------------------------------------------------------- quality metrics
@@ -136,4 +175,6 @@ if __name__ == "__main__":
     assert cnr(out, disk, ring) > cnr(base, disk, ring), "enhancement must raise CNR"
     for m in ("clahe", "he", "gamma"):
         assert enhance_contrast(base, m).dtype == np.uint8
+    h = butterworth_transfer((64, 64), cutoff=10, order=2)
+    assert abs(h[32, 42] - 0.5) < 1e-9 and h[32, 32] == 1.0, "H must be 1 at the centre and 0.5 at D0"
     print("kidney_preprocess self-check OK")

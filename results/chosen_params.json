@@ -1,24 +1,25 @@
 {
-  "cutoff": 30,
+  "cutoff": 40,
+  "order": 3,
   "contrast": {
-    "adaptive": "clahe",
+    "adaptive": null,
     "watershed": "clahe"
   },
   "segment": {
     "adaptive": {
-      "bone_hu": 350,
-      "block_size": 101,
+      "bone_hu": 400,
+      "block_size": 51,
       "offset": -20,
-      "min_pct": 80,
-      "open_r": 0,
-      "close_r": 3
+      "min_pct": 70,
+      "open_r": 2,
+      "close_r": 2
     },
     "watershed": {
-      "bone_hu": 400,
+      "bone_hu": 300,
       "high_pct": 97,
-      "low_pct": 70,
+      "low_pct": 40,
       "open_r": 0,
-      "close_r": 2
+      "close_r": 3
     }
   },
   "window": {

@@ -24,10 +24,16 @@ def test_window_range():
     assert out.min() == 0 and out.max() == 255 and out.dtype == np.uint8
 
 
-def test_enhancement_raises_cnr():
-    hu, kidneys = synthetic_abdomen()
-    ring = pre.surrounding_ring(kidneys, pre.body_mask(hu))
-    assert pre.cnr(pre.enhance(hu), kidneys, ring) > pre.cnr(pre.window_normalize(hu), kidneys, ring)
+def test_enhancement_reduces_noise():
+    """Bilateral + Butterworth must lower the noise in a flat tissue region far from any edge."""
+    hu, _ = synthetic_abdomen()
+    flat = (slice(120, 140), slice(118, 138))          # plain soft tissue between the organs
+    assert pre.enhance(hu)[flat].std() < pre.window_normalize(hu)[flat].std()
+
+
+def test_butterworth_shape():
+    h = pre.butterworth_transfer((64, 64), cutoff=10, order=2)
+    assert h[32, 32] == 1.0 and abs(h[32, 42] - 0.5) < 1e-9 and h[32, 63] < 0.02
 
 
 def test_bone_is_found_before_windowing():

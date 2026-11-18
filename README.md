@@ -5,7 +5,7 @@ This is the kidney half of the group project. The tumour half (Maneet) uses the 
 
 ```
 Raw CT slice (HU)
-  -> Phase 1  window [-100, 300] HU -> bilateral filter -> (contrast step chosen per strategy by tuned training Dice) -> Gaussian low-pass (cutoff by training Dice)
+  -> Phase 1  window [-100, 300] HU -> bilateral filter -> (contrast step chosen per strategy by tuned training Dice) -> Butterworth low-pass (D0 and order n by training Dice)
   -> Phase 2  adaptive local thresholding  |  marker-controlled watershed   + custom-SE morphology + anatomical rule filter
   -> Phase 3  17 features per candidate blob -> SVM (RBF) -> kidney / not kidney -> final kidney mask
 ```
@@ -18,7 +18,7 @@ Raw CT slice (HU)
 | Edge-preserving filter | Anisotropic diffusion | **Bilateral filter** |
 | Baseline smoothing | Median | **Gaussian** |
 | Contrast | CLAHE vs HE | CLAHE vs HE vs **Gamma correction** |
-| Frequency domain | Butterworth low-pass (homomorphic compared) | **Gaussian low-pass** |
+| Frequency domain | Homomorphic filter (teammate) | **Butterworth low-pass** (Gaussian low-pass compared only) |
 | Segmentation A | Multi-Otsu | **Adaptive local thresholding** |
 | Segmentation B | Seeded region growing | **Marker-controlled watershed** |
 | Morphology SEs | disk opening, ellipse closing | **hand-built cross** (markers), **diamond** opening, disk closing |
@@ -32,7 +32,7 @@ cd kidney-segmentation
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest -q                 # 8 quick tests on synthetic data, should all pass
+python -m pytest -q                 # 9 quick tests on synthetic data, should all pass
 ```
 
 The app needs Tkinter. The python.org installer includes it. With Homebrew Python, run `brew install python-tk`.
@@ -60,7 +60,7 @@ python kidney_app.py                # prototype GUI
 | File | Job |
 |---|---|
 | `prepare_kidney_data.py` | Download cases, pick 6 slices per case spread across the kidney, save `.npz` |
-| `kidney_preprocess.py` | Phase 1: window, body / bone masks, bilateral vs Gaussian, CLAHE / HE / gamma, DFT spectrum, Gaussian low-pass, PSNR, CNR |
+| `kidney_preprocess.py` | Phase 1: window, body / bone masks, bilateral vs Gaussian, CLAHE / HE / gamma, DFT spectrum, Butterworth low-pass (+ Gaussian low-pass for comparison), PSNR, CNR |
 | `kidney_segment.py` | Phase 2: custom SEs, morphology, adaptive thresholding, marker-controlled watershed, rule filter, Dice, IoU |
 | `kidney_classify.py` | Phase 3: shape / GLCM / HU / position features, patient-wise 70/30 split, SVM with grouped 5-fold CV |
 | `run_kidney_pipeline.py` | Runs everything, makes all report figures and tables |
@@ -75,7 +75,8 @@ python kidney_app.py                # prototype GUI
 | `phase1_psnr_cnr.csv`, `phase1_comparison.png` | PSNR / CNR table; all Phase 1 steps side by side, DFT spectrum before / after low-pass |
 | `phase1_histograms.png` | Histograms + cumulative histograms: window vs CLAHE vs HE vs gamma |
 | `phase1_edges.png` | Zoomed kidney edge + intensity profile: Gaussian blurs the edge, bilateral keeps it |
-| `phase1_lowpass_cutoff.csv` | Training CNR and Dice for each low-pass cutoff D0 (Dice decides) |
+| `phase1_frequency_comparison.csv` | Butterworth (n = 1, 2, 3) and Gaussian low-pass for every D0: training CNR and Dice. Best Butterworth goes in the chain; Gaussian is comparison only |
+| `phase1_frequency.png` | Filter profiles H(D) for Butterworth n = 1, 2, 3 vs Gaussian, H(u,v) images, log-magnitude spectrum before / after each filter, filtered slice |
 | `phase1_chain_check.csv` | Training Dice for each strategy x contrast step, before and after tuning |
 | `phase2_sweep.csv/png` | Parameter sweep on training patients (red star = chosen) |
 | `phase2_per_slice.csv`, `phase2_summary.csv` | Dice / IoU per slice and mean, train vs test, both strategies |
@@ -89,9 +90,10 @@ python kidney_app.py                # prototype GUI
 
 ## Method notes (for the report)
 
-- **Patient-wise split.** 70/30 by case (8 training, 4 test patients). Every choice (rule window, low-pass cutoff, contrast step, all Phase 2 parameters, SVM `C` and `gamma`) is made on training patients only, and the test patients are touched once at the end.
+- **Patient-wise split.** 70/30 by case (8 training, 4 test patients). Every choice (rule window, Butterworth D0 and n, contrast step, all Phase 2 parameters, SVM `C` and `gamma`) is made on training patients only, and the test patients are touched once at the end.
 - **Why bone is removed from raw HU.** After a soft-tissue window, bone and contrast-enhanced kidney both saturate near 255. The bone mask has to come from the raw HU before the window discards that difference.
 - **Why the classifier is kidney vs not-kidney.** Both strategies return several bright blobs per slice: kidneys, but also liver edge, spleen, bowel and vessels with similar density. The rule filter (largest blob on each side of the spine inside a position/size window learned from the training ground truth) is the hand-made baseline. The SVM learns the same decision from features, and `metrics.json` compares the two (`test_dice_rule_filter` vs `test_dice_svm_filter`).
+- **Why Butterworth.** The brief (section 6, Phase 1.3) asks for a Butterworth low-pass or a homomorphic filter; the homomorphic filter is a teammate's, so this part uses the Butterworth, H(u,v) = 1 / (1 + (D/D0)^(2n)). The order n is the extra freedom a Gaussian lacks: it sets how sharply the filter cuts at D0. The Gaussian low-pass is kept only as a comparison.
 - **Relative thresholds.** Threshold levels are percentiles of each patient's own body grey levels, because how strongly the kidney brightens depends on scan timing after the contrast injection.
 - **Masked GLCM.** Only pixel pairs that are both inside the blob are counted, so surrounding fat does not leak into the texture features.
 

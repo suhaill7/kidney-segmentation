@@ -1,9 +1,9 @@
 method,contrast,dice_default,dice_tuned
-adaptive,none,0.5351,0.6773
-adaptive,clahe,0.5255,0.6794
-adaptive,he,0.48,0.6099
-adaptive,gamma,0.4871,0.6744
-watershed,none,0.4831,0.6594
-watershed,clahe,0.5689,0.6745
-watershed,he,0.5236,0.6127
-watershed,gamma,0.4734,0.6585
+adaptive,none,0.5054,0.6562
+adaptive,clahe,0.5364,0.6227
+adaptive,he,0.5077,0.5928
+adaptive,gamma,0.5152,0.6518
+watershed,none,0.5269,0.6275
+watershed,clahe,0.5483,0.6656
+watershed,he,0.4936,0.6095
+watershed,gamma,0.5202,0.6645

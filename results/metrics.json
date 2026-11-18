@@ -15,9 +15,13 @@
     6,
     7
   ],
-  "lowpass_cutoff": 30,
+  "lowpass": {
+    "filter": "butterworth",
+    "D0": 40,
+    "order_n": 3
+  },
   "contrast_step": {
-    "adaptive": "clahe",
+    "adaptive": null,
     "watershed": "clahe"
   },
   "rule_window": {
@@ -60,76 +64,81 @@
       "cnr": 3.05
     },
     {
-      "step": "Gaussian low-pass D0=30",
-      "psnr": 23.48,
-      "cnr": 3.4
+      "step": "Butterworth D0=40 n=3",
+      "psnr": 23.8,
+      "cnr": 3.41
+    },
+    {
+      "step": "Gaussian LP D0=40 (compared)",
+      "psnr": 24.68,
+      "cnr": 3.59
     },
     {
       "step": "Final chain",
-      "psnr": 19.96,
-      "cnr": 3.19
+      "psnr": 19.83,
+      "cnr": 3.18
     }
   ],
   "phase2_params": {
     "adaptive": {
-      "bone_hu": 350,
-      "block_size": 101,
+      "bone_hu": 400,
+      "block_size": 51,
       "offset": -20,
-      "min_pct": 80,
-      "open_r": 0,
-      "close_r": 3
+      "min_pct": 70,
+      "open_r": 2,
+      "close_r": 2
     },
     "watershed": {
-      "bone_hu": 400,
+      "bone_hu": 300,
       "high_pct": 97,
-      "low_pct": 70,
+      "low_pct": 40,
       "open_r": 0,
-      "close_r": 2
+      "close_r": 3
     }
   },
   "phase2_summary": [
     {
       "split": "test",
-      "dice_adaptive": 0.5,
-      "iou_adaptive": 0.414,
-      "dice_watershed": 0.549,
-      "iou_watershed": 0.467
+      "dice_adaptive": 0.609,
+      "iou_adaptive": 0.497,
+      "dice_watershed": 0.61,
+      "iou_watershed": 0.534
     },
     {
       "split": "train",
-      "dice_adaptive": 0.679,
-      "iou_adaptive": 0.578,
-      "dice_watershed": 0.674,
-      "iou_watershed": 0.592
+      "dice_adaptive": 0.656,
+      "iou_adaptive": 0.543,
+      "dice_watershed": 0.666,
+      "iou_watershed": 0.578
     }
   ],
-  "best_strategy": "adaptive",
+  "best_strategy": "watershed",
   "phase3": {
-    "accuracy": 0.9624060150375939,
-    "recall": 0.9210526315789473,
-    "specificity": 0.9667590027700831,
-    "precision": 0.7446808510638298,
-    "f1": 0.8235294117647057,
-    "cv_accuracy_mean": 0.9430340837614833,
-    "cv_accuracy_std": 0.019772362717503194,
+    "accuracy": 0.9327731092436975,
+    "recall": 0.8787878787878788,
+    "specificity": 0.9534883720930233,
+    "precision": 0.8787878787878788,
+    "f1": 0.8787878787878788,
+    "cv_accuracy_mean": 0.9158989081094344,
+    "cv_accuracy_std": 0.07624473988776843,
     "best_params": {
       "C": 1,
-      "gamma": "scale"
+      "gamma": 0.1
     },
     "confusion_matrix": [
       [
-        349,
-        12
+        82,
+        4
       ],
       [
-        3,
-        35
+        4,
+        29
       ]
     ],
-    "n_train": 745,
-    "n_test": 399,
-    "n_kidney_train": 86,
-    "n_kidney_test": 38,
+    "n_train": 223,
+    "n_test": 119,
+    "n_kidney_train": 74,
+    "n_kidney_test": 33,
     "test_cases": [
       3,
       5,
@@ -137,6 +146,6 @@
       7
     ]
   },
-  "test_dice_rule_filter": 0.5001172244258446,
-  "test_dice_svm_filter": 0.6592814538871511
+  "test_dice_rule_filter": 0.6097482390942771,
+  "test_dice_svm_filter": 0.7014042435601234
 }
