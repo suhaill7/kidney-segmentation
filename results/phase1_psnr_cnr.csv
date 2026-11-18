@@ -1,0 +1,9 @@
+step,psnr,cnr
+"Window [-100,300]",,3.5
+Gaussian,26.24,3.73
+Bilateral,31.62,3.99
+CLAHE,21.84,3.08
+Histogram eq.,17.11,2.7
+Gamma 0.8,28.41,3.05
+Gaussian low-pass D0=30,23.48,3.4
+Final chain,19.96,3.19

@@ -1,0 +1,142 @@
+{
+  "train_cases": [
+    0,
+    1,
+    2,
+    4,
+    8,
+    9,
+    10,
+    11
+  ],
+  "test_cases": [
+    3,
+    5,
+    6,
+    7
+  ],
+  "lowpass_cutoff": 30,
+  "contrast_step": {
+    "adaptive": "clahe",
+    "watershed": "clahe"
+  },
+  "rule_window": {
+    "dx_min": 0.14482909348775183,
+    "dx_max": 0.3830404771105841,
+    "dy_min": -0.30962612123389877,
+    "dy_max": 0.1335591862213733,
+    "area_min": 172.13,
+    "area_max": 13017.159999999994
+  },
+  "phase1": [
+    {
+      "step": "Window [-100,300]",
+      "psnr": NaN,
+      "cnr": 3.5
+    },
+    {
+      "step": "Gaussian",
+      "psnr": 26.24,
+      "cnr": 3.73
+    },
+    {
+      "step": "Bilateral",
+      "psnr": 31.62,
+      "cnr": 3.99
+    },
+    {
+      "step": "CLAHE",
+      "psnr": 21.84,
+      "cnr": 3.08
+    },
+    {
+      "step": "Histogram eq.",
+      "psnr": 17.11,
+      "cnr": 2.7
+    },
+    {
+      "step": "Gamma 0.8",
+      "psnr": 28.41,
+      "cnr": 3.05
+    },
+    {
+      "step": "Gaussian low-pass D0=30",
+      "psnr": 23.48,
+      "cnr": 3.4
+    },
+    {
+      "step": "Final chain",
+      "psnr": 19.96,
+      "cnr": 3.19
+    }
+  ],
+  "phase2_params": {
+    "adaptive": {
+      "bone_hu": 350,
+      "block_size": 101,
+      "offset": -20,
+      "min_pct": 80,
+      "open_r": 0,
+      "close_r": 3
+    },
+    "watershed": {
+      "bone_hu": 400,
+      "high_pct": 97,
+      "low_pct": 70,
+      "open_r": 0,
+      "close_r": 2
+    }
+  },
+  "phase2_summary": [
+    {
+      "split": "test",
+      "dice_adaptive": 0.5,
+      "iou_adaptive": 0.414,
+      "dice_watershed": 0.549,
+      "iou_watershed": 0.467
+    },
+    {
+      "split": "train",
+      "dice_adaptive": 0.679,
+      "iou_adaptive": 0.578,
+      "dice_watershed": 0.674,
+      "iou_watershed": 0.592
+    }
+  ],
+  "best_strategy": "adaptive",
+  "phase3": {
+    "accuracy": 0.9624060150375939,
+    "recall": 0.9210526315789473,
+    "specificity": 0.9667590027700831,
+    "precision": 0.7446808510638298,
+    "f1": 0.8235294117647057,
+    "cv_accuracy_mean": 0.9430340837614833,
+    "cv_accuracy_std": 0.019772362717503194,
+    "best_params": {
+      "C": 1,
+      "gamma": "scale"
+    },
+    "confusion_matrix": [
+      [
+        349,
+        12
+      ],
+      [
+        3,
+        35
+      ]
+    ],
+    "n_train": 745,
+    "n_test": 399,
+    "n_kidney_train": 86,
+    "n_kidney_test": 38,
+    "test_cases": [
+      3,
+      5,
+      6,
+      7
+    ]
+  },
+  "test_dice_rule_filter": 0.5001172244258446,
+  "test_dice_svm_filter": 0.6592814538871511
+}

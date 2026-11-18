@@ -1,0 +1,38 @@
+{
+  "cutoff": 30,
+  "contrast": {
+    "adaptive": "clahe",
+    "watershed": "clahe"
+  },
+  "segment": {
+    "adaptive": {
+      "bone_hu": 350,
+      "block_size": 101,
+      "offset": -20,
+      "min_pct": 80,
+      "open_r": 0,
+      "close_r": 3
+    },
+    "watershed": {
+      "bone_hu": 400,
+      "high_pct": 97,
+      "low_pct": 70,
+      "open_r": 0,
+      "close_r": 2
+    }
+  },
+  "window": {
+    "dx_min": 0.14482909348775183,
+    "dx_max": 0.3830404771105841,
+    "dy_min": -0.30962612123389877,
+    "dy_max": 0.1335591862213733,
+    "area_min": 172.13,
+    "area_max": 13017.159999999994
+  },
+  "test_cases": [
+    3,
+    5,
+    6,
+    7
+  ]
+}
